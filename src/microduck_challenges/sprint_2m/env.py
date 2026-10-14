@@ -280,7 +280,7 @@ def make_env_cfg(
 
 
     # air_time window [0.125, 0.300] s. NOTE: standing still at zero command is
-    # taught by the standing_envs curriculum (→25% standing envs by ~iter 2000),
+    # taught by the standing_envs curriculum (held at 2% standing envs),
     # not by an explicit stillness/no-stepping term.
     cfg.rewards["air_time"].weight = knobs["step_reward"]
     cfg.rewards["air_time"].params["command_threshold"] = 0.01
@@ -313,7 +313,7 @@ def make_env_cfg(
     )
 
     # Action smoothness: stage-0 value; the action_rate_weight curriculum below
-    # ramps it -0.1 → -1.0 by iter 1500.
+    # ramps it -0.1 → -0.4 by iter 750.
     cfg.rewards["action_rate_l2"].weight = -0.1
 
     cfg.rewards["foot_clearance"].params["command_threshold"] = 0.01
@@ -711,7 +711,7 @@ def make_env_cfg(
     cfg.scene.terrain.terrain_generator = None
 
     # action_rate weight ramp: gentle smoothing while the gait bootstraps, then
-    # tighten to -1.0 by iter 1500.
+    # tighten to -0.4 by iter 750 (capped there, see below).
     cfg.curriculum["action_rate_weight"] = CurriculumTermCfg(
         func=microduck_mdp.reward_weight,
         params={
@@ -720,25 +720,23 @@ def make_env_cfg(
                 {"step": 0, "weight": -0.1},
                 {"step": 500 * NUM_STEPS_PER_ENV, "weight": -0.2},
                 {"step": 750 * NUM_STEPS_PER_ENV, "weight": -0.4},
-                {"step": 1000 * NUM_STEPS_PER_ENV, "weight": -0.6},
-                {"step": 1250 * NUM_STEPS_PER_ENV, "weight": -0.8},
-                {"step": 1500 * NUM_STEPS_PER_ENV, "weight": -1.0},
+                # Capped at -0.4 (was ramped to -1.0 by iter 1500): run
+                # heading-std015-sym scored 4.43 s at iter 1000 and slowed to
+                # 5.2-5.6 s once the ramp passed -0.8; strong smoothing fights
+                # the sharp leg motion a fast gait needs.
             ],
         },
     )
 
-    # Gradually increase standing env fraction after walking is established
+    # Standing envs held at 2% (was ramped to 25% by iter 2000): the Arena
+    # never commands 0 m/s, so that share of training was spent off-task.
+    # Kept non-zero so the zero-command input stays alive.
     cfg.curriculum["standing_envs"] = CurriculumTermCfg(
         func=microduck_mdp.standing_envs_curriculum,
         params={
             "command_name": "twist",
             "standing_stages": [
                 {"step": 0,           "rel_standing_envs": 0.02},
-                {"step": 500 * 24,    "rel_standing_envs": 0.05},
-                {"step": 750 * 24,    "rel_standing_envs": 0.1},
-                {"step": 1000 * 24,   "rel_standing_envs": 0.15},
-                {"step": 1500 * 24,   "rel_standing_envs": 0.2},
-                {"step": 2000 * 24,   "rel_standing_envs": 0.25},
             ],
         },
     )
