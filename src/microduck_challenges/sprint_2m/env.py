@@ -228,7 +228,13 @@ def make_env_cfg(
     # Pose reward configuration
     cfg.rewards["pose"].params["std_standing"] = std_standing  # tight when command=0
     cfg.rewards["pose"].params["std_walking"] = std_walking
-    cfg.rewards["pose"].params["std_running"] = std_walking
+    # Longer strides at speed: hip_pitch/knee tolerance 0.4 → 0.6 from 0.6 m/s.
+    # running_threshold must move too: its default (1.5 m/s) is above the
+    # sweep's 1.2 m/s, so std_running never applied. Run ar04-stand02 plateaued
+    # at 0.65 m/s; at a fixed cadence, stride length caps speed.
+    std_running = {**std_walking, r".*hip_pitch.*": 0.6, r".*knee.*": 0.6}
+    cfg.rewards["pose"].params["std_running"] = std_running
+    cfg.rewards["pose"].params["running_threshold"] = 0.6
     # Pose reward operates on LEG joints only. Head/neck are command-driven
     # (head_pose_tracking) — if they were in this reward too, it would pull
     # them to HOME while head_pose_tracking pulls them to the command, and the
