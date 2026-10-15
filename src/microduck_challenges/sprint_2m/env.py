@@ -615,7 +615,9 @@ def make_env_cfg(
     # standup/ground_pick envs mutate commands["twist"] in place, zeroing ranges)
     command: UniformVelocityCommandCfg = deepcopy(cfg.commands["twist"])
     cfg.commands["twist"] = command
-    command.rel_standing_envs = 0.02  # small but non-zero from the start, ramped up by curriculum
+    # dash1: 0 (was 2%) — the speed reward below ignores the command, so a
+    # stand-still env would be asked to do two contradictory things.
+    command.rel_standing_envs = 0.0
     command.rel_heading_envs = 0.0
     # The ranges are the Arena event's own (arena/events/sprint-2m.toml):
     # straight ahead, the event's sweep of commanded speeds, never sideways or
@@ -675,9 +677,13 @@ def make_env_cfg(
     # std=0.5 with per-joint Gaussian (see head_pose_tracking in mdp.py). Final
     # reward is the mean over 4 joints, so partial tracking is partial reward
     # (no all-or-nothing).
+    # dash1: weight 2.0 → 0. The sprint leaders run with the neck pitched
+    # ~1.5 rad forward of HOME as a counterweight; this term (and
+    # head_pose_bias below) pinned the head at HOME. The command and its obs
+    # slot stay alive (61-number layout); only the reward is off.
     cfg.rewards["head_pose_tracking"] = RewardTermCfg(
         func=microduck_mdp.head_pose_tracking,
-        weight=2.0,
+        weight=0.0,
         params={"command_name": "head_pose", "std": 0.5},
     )
     # body_pose: infra kept intact but DISABLED (weight 0) — the obs slot and
@@ -716,6 +722,20 @@ def make_env_cfg(
     cfg.scene.terrain.terrain_type = "plane"
     cfg.scene.terrain.terrain_generator = None
 
+    # dash1: raw forward speed, independent of the command. The Arena keeps
+    # the best of the sweep, and the leaders (0.90 s ≈ 2.2 m/s) score the
+    # same at any command; track_linear_velocity caps reward at the command
+    # (≤ 1.2 m/s). tanh(vx / 1.5) still pays ~8% more at 2.5 m/s than at 1.5.
+    cfg.rewards["forward_speed"] = RewardTermCfg(
+        func=microduck_mdp.forward_speed_reward,
+        weight=6.0,
+        params={"vel_ref": 1.5, "asset_cfg": SceneEntityCfg("robot")},
+    )
+
+    # dash1: 20 s → 4 s. The race is a 0.5 s settle plus < 1 s of running from
+    # a standstill; short episodes make accelerating from rest ~5x more common.
+    cfg.episode_length_s = 4.0
+
     # action_rate weight ramp: gentle smoothing while the gait bootstraps, then
     # tighten to -0.4 by iter 750 (capped there, see below).
     cfg.curriculum["action_rate_weight"] = CurriculumTermCfg(
@@ -742,7 +762,7 @@ def make_env_cfg(
         params={
             "command_name": "twist",
             "standing_stages": [
-                {"step": 0,           "rel_standing_envs": 0.02},
+                {"step": 0,           "rel_standing_envs": 0.0},
             ],
         },
     )
@@ -812,19 +832,14 @@ def make_env_cfg(
     del cfg.curriculum["terrain_levels"]
     del cfg.curriculum["command_vel"]
 
-    # head_pose_bias ramp: OFF until iter 600, then 1.0 → 3.0 by iter 1500.
-    # Held at 0 early because a posture-precision term is a distraction before
-    # a gait exists. At weight 3.0 a 15° residual bias costs 0.79/step and a
-    # 2° bias costs 0.10/step.
+    # dash1: held at 0 for the whole run (was 1.0 → 3.0 from iter 600) — the
+    # head is free to pitch forward as a counterweight (see head_pose_tracking).
     cfg.curriculum["head_pose_bias_weight"] = CurriculumTermCfg(
         func=microduck_mdp.reward_weight,
         params={
             "reward_name": "head_pose_bias",
             "weight_stages": [
                 {"step": 0, "weight": 0.0},
-                {"step": 600 * NUM_STEPS_PER_ENV, "weight": 1.0},
-                {"step": 1000 * NUM_STEPS_PER_ENV, "weight": 2.0},
-                {"step": 1500 * NUM_STEPS_PER_ENV, "weight": 3.0},
             ],
         },
     )
