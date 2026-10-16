@@ -725,11 +725,15 @@ def make_env_cfg(
     # dash1: raw forward speed, independent of the command. The Arena keeps
     # the best of the sweep, and the leaders (0.90 s ≈ 2.2 m/s) score the
     # same at any command; track_linear_velocity caps reward at the command
-    # (≤ 1.2 m/s). tanh(vx / 1.5) still pays ~8% more at 2.5 m/s than at 1.5.
+    # (≤ 1.2 m/s).
+    # dash2: vel_ref 1.5 → 3.0 AND weight 6 → 12. dash1 plateaued at ~1.2 m/s
+    # (1.65 s). Raising vel_ref alone would WEAKEN the push there (slope at
+    # 1.2 m/s: 6·sech²(0.8)/1.5 = 2.24 → 6·sech²(0.4)/3 = 1.71), so the weight
+    # doubles: slope 3.42 at 1.2 m/s (1.5x) and 2.44 at 2.2 m/s (3x dash1's 0.77).
     cfg.rewards["forward_speed"] = RewardTermCfg(
         func=microduck_mdp.forward_speed_reward,
-        weight=6.0,
-        params={"vel_ref": 1.5, "asset_cfg": SceneEntityCfg("robot")},
+        weight=12.0,
+        params={"vel_ref": 3.0, "asset_cfg": SceneEntityCfg("robot")},
     )
 
     # dash1: 20 s → 4 s. The race is a 0.5 s settle plus < 1 s of running from
