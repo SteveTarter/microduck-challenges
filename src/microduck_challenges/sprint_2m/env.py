@@ -293,13 +293,20 @@ def make_env_cfg(
     cfg.rewards["air_time"].params["threshold_min"] = 0.125
     cfg.rewards["air_time"].params["threshold_max"] = 0.300
 
-    cfg.rewards["body_ang_vel"].weight = -0.05
-    cfg.rewards["angular_momentum"].weight = -0.02
+    # dash4: both 0 (were -0.05 / -0.02). Motion-blockers: they price the trunk
+    # rotation a fast gait physically needs (upstream AGENTS.md: keep them LOW
+    # for dynamic tasks). dash3 (step_reward 3 -> 1) left the 1.44 s plateau
+    # unchanged, so air_time was not the brake.
+    cfg.rewards["body_ang_vel"].weight = 0.0
+    cfg.rewards["angular_momentum"].weight = 0.0
 
     # Velocity tracking rewards
     cfg.rewards["track_linear_velocity"].weight = knobs["forward_reward"]
     cfg.rewards["track_linear_velocity"].params["std"] = math.sqrt(0.1)
-    cfg.rewards["track_angular_velocity"].weight = 2.0
+    # dash4: 2.0 -> 0.5. Besides yaw rate, this term penalises roll and pitch
+    # RATES (xy_error), which a fast, bouncing gait cannot avoid; heading_hold
+    # below already keeps the heading.
+    cfg.rewards["track_angular_velocity"].weight = 0.5
     cfg.rewards["track_angular_velocity"].params["std"] = math.sqrt(0.5)
 
     # Walk straight. The Arena commands yaw 0 and never tells the policy its
