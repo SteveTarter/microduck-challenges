@@ -232,21 +232,9 @@ def make_env_cfg(
     # running_threshold must move too: its default (1.5 m/s) is above the
     # sweep's 1.2 m/s, so std_running never applied. Run ar04-stand02 plateaued
     # at 0.65 m/s; at a fixed cadence, stride length caps speed.
-    # dash5: hip_pitch/knee 0.6 -> 1.0, ankle 0.25 -> 0.5, hip_yaw 0.3 -> 0.5,
-    # and running_threshold 0.6 -> 0.2 so the loose stds cover the whole sweep.
-    # dash4's best (1.21 s) ran at a 0.25 m/s command, where std_walking
-    # applied; forward_speed ignores the command, so every command sprints.
-    # Pose std is a motion-blocker (upstream AGENTS.md); dash4 showed loosening
-    # those is what moves the plateau.
-    std_running = {
-        **std_walking,
-        r".*hip_yaw.*": 0.5,
-        r".*hip_pitch.*": 1.0,
-        r".*knee.*": 1.0,
-        r".*ankle.*": 0.5,
-    }
+    std_running = {**std_walking, r".*hip_pitch.*": 0.6, r".*knee.*": 0.6}
     cfg.rewards["pose"].params["std_running"] = std_running
-    cfg.rewards["pose"].params["running_threshold"] = 0.2
+    cfg.rewards["pose"].params["running_threshold"] = 0.6
     # Pose reward operates on LEG joints only. Head/neck are command-driven
     # (head_pose_tracking) — if they were in this reward too, it would pull
     # them to HOME while head_pose_tracking pulls them to the command, and the
