@@ -305,7 +305,10 @@ def make_env_cfg(
     # level in steady gait while transient lean (push recovery, accel) stays
     # affordable.
     cfg.rewards["upright"].weight = knobs["upright_reward"]
-    cfg.rewards["upright"].params["std"] = math.sqrt(0.05)
+    # climb1 (from sprint dash6): std² 0.05 -> 0.2, so a forward lean keeps
+    # most of this term (20° lean: ~10% -> ~56%). The Arena calls a fall only
+    # past 60° held 0.3 s.
+    cfg.rewards["upright"].params["std"] = math.sqrt(0.2)
 
     # Foot-specific configurations. In mjlab 1.3.0 foot_swing_height is fully
     # sensor-driven (no asset_cfg); only foot_clearance/foot_slip still carry an
@@ -342,13 +345,17 @@ def make_env_cfg(
     cfg.rewards["air_time"].params["threshold_min"] = 0.125
     cfg.rewards["air_time"].params["threshold_max"] = 0.300
 
-    cfg.rewards["body_ang_vel"].weight = -0.05
-    cfg.rewards["angular_momentum"].weight = -0.02
+    # climb1 (from sprint dash4): both 0 (were -0.05 / -0.02). Motion-blockers
+    # that price the trunk rotation a fast gait needs.
+    cfg.rewards["body_ang_vel"].weight = 0.0
+    cfg.rewards["angular_momentum"].weight = 0.0
 
     # Velocity tracking rewards
     cfg.rewards["track_linear_velocity"].weight = knobs["forward_reward"]
     cfg.rewards["track_linear_velocity"].params["std"] = math.sqrt(0.1)
-    cfg.rewards["track_angular_velocity"].weight = 2.0
+    # climb1 (from sprint dash4): 2.0 -> 0.5. It also penalises roll/pitch
+    # RATES, which a fast gait cannot avoid; heading_hold keeps the heading.
+    cfg.rewards["track_angular_velocity"].weight = 0.5
     cfg.rewards["track_angular_velocity"].params["std"] = math.sqrt(0.5)
 
     # Walk straight. The Arena commands yaw 0 and never tells the policy its
@@ -662,7 +669,9 @@ def make_env_cfg(
     # standup/ground_pick envs mutate commands["twist"] in place, zeroing ranges)
     command: UniformVelocityCommandCfg = deepcopy(cfg.commands["twist"])
     cfg.commands["twist"] = command
-    command.rel_standing_envs = 0.02  # small but non-zero from the start, ramped up by curriculum
+    # climb1: 0 — the speed reward below ignores the command, so a
+    # stand-still env would be asked to do two contradictory things.
+    command.rel_standing_envs = 0.0
     command.rel_heading_envs = 0.0
     # The ranges are the Arena event's own (arena/events/hill-climb-1m5.toml):
     # straight ahead, the event's sweep of commanded speeds, never sideways or
@@ -722,9 +731,11 @@ def make_env_cfg(
     # std=0.5 with per-joint Gaussian (see head_pose_tracking in mdp.py). Final
     # reward is the mean over 4 joints, so partial tracking is partial reward
     # (no all-or-nothing).
+    # climb1 (from sprint dash1): weight 2.0 -> 0, the head is free to pitch
+    # forward as a counterweight. The command and its obs slot stay alive.
     cfg.rewards["head_pose_tracking"] = RewardTermCfg(
         func=microduck_mdp.head_pose_tracking,
-        weight=2.0,
+        weight=0.0,
         params={"command_name": "head_pose", "std": 0.5},
     )
     # body_pose: infra kept intact but DISABLED (weight 0) — the obs slot and
@@ -761,6 +772,9 @@ def make_env_cfg(
 
     # Terrain: generated slopes (the course is an 8° lane).
     cfg.scene.terrain.terrain_type = "generator"
+    # (climb1 keeps the 20 s episodes, unlike the sprint's 4 s: the robot
+    # spawns on a pyramid's top platform, so an episode's first metres run
+    # downhill and short episodes would leave little climbing.)
     cfg.scene.terrain.terrain_generator = _hill_terrain(knobs["max_slope_deg"])
 
     # Kept from the source's rough task (see _soften_terrain_contacts): there
@@ -787,8 +801,20 @@ def make_env_cfg(
         cfg.scene.terrain.terrain_generator.num_cols = 5
         cfg.scene.terrain.terrain_generator.num_rows = 5
 
+    # climb1 (from sprint dash4): a fast, sharp gait — raw forward speed,
+    # whatever the command. The Arena keeps the best of the sweep, and the
+    # leader (0.78 s up 1.5 m, ~1.9 m/s) scores the same at any command;
+    # track_linear_velocity caps reward at the command (<= 1.0 m/s).
+    cfg.rewards["forward_speed"] = RewardTermCfg(
+        func=microduck_mdp.forward_speed_reward,
+        weight=12.0,
+        params={"vel_ref": 3.0, "asset_cfg": SceneEntityCfg("robot")},
+    )
+
     # action_rate weight ramp: gentle smoothing while the gait bootstraps, then
-    # tighten to -1.0 by iter 1500.
+    # tighten to -0.4 by iter 750 (climb1: capped there, was -1.0 by iter
+    # 1500; on the sprint, strong smoothing fought the sharp leg motion a fast
+    # gait needs).
     cfg.curriculum["action_rate_weight"] = CurriculumTermCfg(
         func=microduck_mdp.reward_weight,
         params={
@@ -797,25 +823,18 @@ def make_env_cfg(
                 {"step": 0, "weight": -0.1},
                 {"step": 500 * NUM_STEPS_PER_ENV, "weight": -0.2},
                 {"step": 750 * NUM_STEPS_PER_ENV, "weight": -0.4},
-                {"step": 1000 * NUM_STEPS_PER_ENV, "weight": -0.6},
-                {"step": 1250 * NUM_STEPS_PER_ENV, "weight": -0.8},
-                {"step": 1500 * NUM_STEPS_PER_ENV, "weight": -1.0},
             ],
         },
     )
 
-    # Gradually increase standing env fraction after walking is established
+    # climb1: no standing envs (was ramped 2% -> 25%); the Arena never
+    # commands 0 m/s and the speed reward ignores the command.
     cfg.curriculum["standing_envs"] = CurriculumTermCfg(
         func=microduck_mdp.standing_envs_curriculum,
         params={
             "command_name": "twist",
             "standing_stages": [
-                {"step": 0,           "rel_standing_envs": 0.02},
-                {"step": 500 * 24,    "rel_standing_envs": 0.05},
-                {"step": 750 * 24,    "rel_standing_envs": 0.1},
-                {"step": 1000 * 24,   "rel_standing_envs": 0.15},
-                {"step": 1500 * 24,   "rel_standing_envs": 0.2},
-                {"step": 2000 * 24,   "rel_standing_envs": 0.25},
+                {"step": 0,           "rel_standing_envs": 0.0},
             ],
         },
     )
@@ -884,19 +903,14 @@ def make_env_cfg(
     # Disable default curriculum
     del cfg.curriculum["command_vel"]
 
-    # head_pose_bias ramp: OFF until iter 600, then 1.0 → 3.0 by iter 1500.
-    # Held at 0 early because a posture-precision term is a distraction before
-    # a gait exists. At weight 3.0 a 15° residual bias costs 0.79/step and a
-    # 2° bias costs 0.10/step.
+    # climb1 (from sprint dash1): held at 0 for the whole run (was 1.0 -> 3.0
+    # from iter 600), the head is free to pitch forward as a counterweight.
     cfg.curriculum["head_pose_bias_weight"] = CurriculumTermCfg(
         func=microduck_mdp.reward_weight,
         params={
             "reward_name": "head_pose_bias",
             "weight_stages": [
                 {"step": 0, "weight": 0.0},
-                {"step": 600 * NUM_STEPS_PER_ENV, "weight": 1.0},
-                {"step": 1000 * NUM_STEPS_PER_ENV, "weight": 2.0},
-                {"step": 1500 * NUM_STEPS_PER_ENV, "weight": 3.0},
             ],
         },
     )
