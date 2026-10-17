@@ -31,7 +31,7 @@ from copy import deepcopy
 NUM_STEPS_PER_ENV = 24
 
 # Symmetry
-ENABLE_SYMMETRY = False
+ENABLE_SYMMETRY = True  # climb2 (from sprint): mirror L/R gait to cancel the steady yaw drift at speed
 
 # Domain randomization toggles
 ENABLE_COM_RANDOMIZATION = True
@@ -369,7 +369,10 @@ def make_env_cfg(
     cfg.rewards["heading_hold"] = RewardTermCfg(
         func=microduck_mdp.heading_hold_reward,
         weight=1.0,
-        params={"std": 0.4, "asset_cfg": SceneEntityCfg("robot")},
+        # climb2 (from sprint): std 0.4 -> 0.15. At 0.4 a 3° drift kept ~98%
+        # of the term (free); at 0.15 it costs ~12%, enough to fight drift
+        # into the lane's walls at speed.
+        params={"std": 0.15, "asset_cfg": SceneEntityCfg("robot")},
     )
 
     # Action smoothness: stage-0 value; the action_rate_weight curriculum below
