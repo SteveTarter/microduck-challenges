@@ -256,7 +256,10 @@ def make_env_cfg(
     # level in steady gait while transient lean (push recovery, accel) stays
     # affordable.
     cfg.rewards["upright"].weight = knobs["upright_reward"]
-    cfg.rewards["upright"].params["std"] = math.sqrt(0.05)
+    # dash6: std² 0.05 -> 0.2. At 0.05 a 20° forward lean kept ~10% of this
+    # term; a sprint wants that lean. At 0.2 it keeps ~56%. The Arena calls a
+    # fall only past 60° held 0.3 s, and training terminates at 70°.
+    cfg.rewards["upright"].params["std"] = math.sqrt(0.2)
 
     # Foot-specific configurations. In mjlab 1.3.0 foot_swing_height is fully
     # sensor-driven (no asset_cfg); only foot_clearance/foot_slip still carry an
