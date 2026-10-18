@@ -278,10 +278,12 @@ def make_env_cfg(
     # is 'content' there instead of over-driving.
     # skate1: 0.3 -> 1.5. The Arena timer pays for speed, and the 0.3 target capped
     # the reward near 0.3 m/s; 1.5 keeps the tanh rising up to ~2.5 m/s.
+    # skate2: 1.5 -> 0.6. skate1 scored 3.81 s (worse): 1.5 left the tanh too flat at
+    # the low speeds the policy starts from; 0.6 keeps a slope there and up to ~1 m/s.
     cfg.rewards["wheel_speed"] = RewardTermCfg(
         func=microduck_mdp.wheel_speed_reward,
         weight=knobs["speed_reward"],
-        params={"command_name": "twist", "vel_scale": 1.5},
+        params={"command_name": "twist", "vel_scale": 0.6},
     )
     # Brake: reward stopping when cmd_x < 0. Silent at cmd_x >= 0 (coast/push).
     cfg.rewards["braking"] = RewardTermCfg(
