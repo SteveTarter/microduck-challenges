@@ -276,10 +276,12 @@ def make_env_cfg(
     # un-saturated tanh slope and kept pushing it to go faster than it can (over-
     # reach -> launch instability). 0.3 saturates near the achievable speed, so it
     # is 'content' there instead of over-driving.
+    # skate1: 0.3 -> 1.5. The Arena timer pays for speed, and the 0.3 target capped
+    # the reward near 0.3 m/s; 1.5 keeps the tanh rising up to ~2.5 m/s.
     cfg.rewards["wheel_speed"] = RewardTermCfg(
         func=microduck_mdp.wheel_speed_reward,
         weight=knobs["speed_reward"],
-        params={"command_name": "twist", "vel_scale": 0.3},
+        params={"command_name": "twist", "vel_scale": 1.5},
     )
     # Brake: reward stopping when cmd_x < 0. Silent at cmd_x >= 0 (coast/push).
     cfg.rewards["braking"] = RewardTermCfg(
