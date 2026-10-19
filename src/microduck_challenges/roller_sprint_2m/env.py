@@ -218,11 +218,9 @@ def make_env_cfg(
     cfg.rewards["angular_momentum"].weight = 0.0
     cfg.rewards["action_rate_l2"].weight = -0.4
 
-    cfg.rewards["com_height_target"] = RewardTermCfg(
-        func=microduck_mdp.com_height_target,
-        weight=2.0,
-        params={"target_height_min": 0.0935, "target_height_max": 0.1235},
-    )
+    # skate4: com_height_target (weight 2, +1 per step for a trunk between 0.0935
+    # and 0.1235 m) removed. skate3 crouched at 0.111 m to keep it; the 0.928 s
+    # leader rides at ~0.151 m, leaning forward with longer strides.
     cfg.rewards["self_collisions"] = RewardTermCfg(
         func=mdp.self_collision_cost,
         weight=-1.0,
@@ -266,7 +264,9 @@ def make_env_cfg(
     # it — or, if no stable narrow stance exists, it stays partly splayed.)
     cfg.rewards["hip_roll_neutral"] = RewardTermCfg(
         func=microduck_mdp.joint_deviation_l1,
-        weight=-2.0,  # -1.0 -> -2.0: stronger centring pull. Sim already keeps hip_roll
+        # skate4: -2.0 -> 0.0. skate3 kept hip_roll locked (std 0.01 rad); the
+        # leader pushes sideways with it (±0.44 rad).
+        weight=0.0,  # was -1.0 -> -2.0: stronger centring pull. Sim already keeps hip_roll
                       # narrow, but a stronger corrective may help the REAL robot resist
                       # whatever spreads the legs (deployment/disturbance). Lower if it
                       # flattens the push.

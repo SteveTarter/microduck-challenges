@@ -54,7 +54,7 @@ observation noise.
 | Knob | Label | Default | Range | Sets in `env.py` |
 |---|---|---|---|---|
 | `speed_reward` | Forward speed reward | 12.0 | 2.0–20.0 | `forward_speed` weight |
-| `upright_reward` | Stay upright | 2.0 | 0.5–5.0 | `upright` weight |
+| `upright_reward` | Stay upright | 1.0 | 0.5–5.0 | `upright` weight |
 
 Since skate3, `forward_speed` (trunk speed, independent of the command, as in the 2 m Sprint) is
 the main task reward. The skating-style terms (`wheel_speed`, `braking`, `skating_air_time`, `glide`,
