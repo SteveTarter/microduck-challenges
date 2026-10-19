@@ -39,17 +39,21 @@ positions from the default pose (14), joint velocities one control step old (14)
 then the 13 command numbers the timeline gives: twist (3), head (4), body (6). This challenge's
 policy reads:
 
-- `twist[0]`, the **sit flag**: 1 sits, 0 stands; `twist[1]` and `twist[2]` unused (0);
+- `twist`, **the walking command**: forward m/s, sideways m/s (left +), turn rad/s (left +);
 - `head`, **4 angles in radians from the default pose**: neck_pitch, head_pitch, head_yaw, head_roll;
 - `body`: unused (zeros).
 
-A short `timeline.json` (Pollen's, 9 keyframes over 20 s, is in this folder):
+Since dance1 (2026-10-19) the policy is a walker, and this folder's `timeline.json` is the
+**Electric Slide** (Ric Silvern, 18 counts at 0.5 s each, so a wall is 9 s): vine right, vine left,
+move back, forward touch, back touch, then step and quarter turn left, repeated. Each section is one
+keyframe:
 
 ```json
 {"timeline_version": 1, "duration_s": 20.0, "keyframes": [
-  {"t": 0.0,  "twist": [0, 0, 0], "head": [0, 0, 0, 0]},
-  {"t": 2.0,  "twist": [1, 0, 0], "head": [0, 0, 0.5, 0]},
-  {"t": 7.0,  "twist": [0, 0, 0], "head": [0, 0.4, 0, 0]}
+  {"t": 0, "twist": [0, -0.3, 0], "head": [0, 0, 0, 0]},
+  {"t": 2, "twist": [0, 0.3, 0],  "head": [0, 0, 0, 0]},
+  {"t": 4, "twist": [-0.3, 0, 0], "head": [0, 0, 0, 0]},
+  {"t": 8, "twist": [0.15, 0, 1], "head": [0, 0, 0, 0]}
 ]}
 ```
 
@@ -57,18 +61,20 @@ From each keyframe's `t` until the next one, the policy reads that keyframe's nu
 keyframe leaves out is zeros, not the previous value. The first keyframe is at 0, times go up, at most
 1000 keyframes, every number within ±10, `duration_s` at most 20.
 
-**What the policy can do is what training showed it.** This training samples:
+**What the policy can do is what training showed it.** This training samples (microduck_rl's
+velocity task, as is):
 
-- the sit flag at exactly 0 or 1 (values in between were never seen);
-- a posture held 3.5–6.5 s before it may flip; each sit or rise is paced by a 2 s ramp (on the
-  stage the reference sits in about 0.8 s and rises in about 0.3 s);
-- head angles up to ±1.10 (neck_pitch), ±1.10 (head_pitch), ±1.40 (head_yaw), ±0.31 rad (head_roll)
-  once the head curriculum has widened (from iteration 2000), a new head target every 2–5 s.
+- forward -0.4 to 0.4 m/s, sideways -0.3 to 0.3 m/s, turn -1.0 to 1.0 rad/s, held fixed (a ramp
+  to ±2.0 rad/s outpaced the robot upstream); 15 % of environments turn on the spot, and some stand;
+- head angles from a small starting range, widened by the head curriculum.
 
 A test (`test_the_reference_timeline_stays_inside_what_training_saw`) holds this folder's
-`timeline.json` well inside that: flags 0 or 1, head angles within 40 % of those ranges, postures
-changing at least 3.5 s apart, head targets at least 2 s apart. A timeline outside it may still play
-well: check it on the stage, and if the user wants it anyway, adjust the test with them.
+`timeline.json` inside the trained walking ranges, the head inside its starting range and the body at
+zero. A timeline outside it may still play well: check it on the stage, and if the user wants it
+anyway, adjust the test with them.
+
+What a walker cannot show: the grapevine's cross-behind (it sidesteps), the scuffs and touches, and
+singing (an entry carries no sound). Head moves can add style within the head ranges.
 
 ## Files
 
@@ -78,23 +84,23 @@ well: check it on the stage, and if the user wants it anyway, adjust the test wi
 | `challenge.toml` `[params]` | The three knobs below | Yes. Keep each value within its `min`/`max` (the workshop refuses others) |
 | `challenge.toml` `[recipe]` | `num_envs` 4096, `max_iterations` 3000, `seed` 1 | Yes, when agreed with the user |
 | `challenge.toml` `[command]` | What the policy reads in each command group; `publish` writes it into the manifest | Only with the commands' meaning |
-| `env.py` | The whole environment (microduck_rl's sit & stand task): posture rewards, head command and its curriculum, domain randomization, delayed pushes, `RL_CFG` | Yes, once the knobs are not enough |
+| `env.py` | The whole environment (microduck_rl's velocity task, as the 2 m Sprint first copied it): walking and head rewards, command ranges, curricula, domain randomization, pushes, `RL_CFG` | Yes, once the knobs are not enough |
 | `rewards.py` | Does not exist yet: create it for a custom reward term, then add the term to `cfg.rewards` in `env.py` | Yes |
 | `check.py` | Judges a policy's performance of a timeline on the Arena's stage | Use it as is |
 | `tasks.py`, `event`/`task`/`kind` in `challenge.toml` | Registration with mjlab and the Arena | No |
 
 | Knob | Label | Default | Range | Sets in `env.py` |
 |---|---|---|---|---|
-| `head_reward` | Follow the head moves | 0.75 | 0.0–2.0 | `head_pose_tracking` weight |
-| `stillness_reward` | Hold still between moves | 2.0 | 0.0–4.0 | `posture_stillness` weight |
-| `upright_reward` | Stay upright | 2.5 | 0.5–5.0 | `upright_linear` weight |
+| `forward_reward` | Follow the walking moves | 2.0 | 0.5–5.0 | `track_linear_velocity` weight |
+| `upright_reward` | Stay upright | 2.0 | 0.5–5.0 | `upright` weight |
+| `step_reward` | Lift your feet | 3.0 | 0.0–6.0 | `air_time` weight |
 
 Do not change, or the Arena cannot play the policy or the tests fail:
 
 - the robot (`MICRODUCK_STANDUP_ROBOT_CFG`: the walk robot with the Arena's collision set) and the
   61-number observation layout: an unused command slot stays zero-padded, never deleted;
-- the contact solver at the Arena's 10/20 iterations, and no fall termination (the stage plays on
-  after a fall, so training does too);
+- the contact solver at the Arena's 10/20 iterations. (Since dance1 a fall ends a training episode,
+  as in every walking task: a walker cannot get up. The stage still plays on after one.)
 - `experiment_name = "got_a_talent"` in `RL_CFG`: runs must land in `logs/rsl_rl/got_a_talent/`;
 - every domain randomization range must contain the nominal value the Arena simulates (the Arena
   randomizes nothing but the start pose and the servos' command delay; no pushes, no noise);
@@ -115,15 +121,16 @@ nvidia-smi              # an NVIDIA GPU here trains locally; otherwise Hugging F
 uv run hf auth whoami   # the account a job runs and bills under, and publish publishes to
 ```
 
-Pollen's reference policy lets you try a timeline before any training of the user's own:
+The Arena ships Pollen's general walker, which lets you try a timeline before any training:
 
 ```bash
-uv run hf download pollen-robotics/microduck-got-a-talent-reference policy.onnx --local-dir logs/reference/got-a-talent
-uv run --group workshop python -m microduck_challenges.got_a_talent.check logs/reference/got-a-talent/policy.onnx
+uv run --group workshop python -m microduck_challenges.got_a_talent.check .venv/lib/python3.12/site-packages/arena/assets/policies/BEST_alpha_walking.onnx
 ```
 
-With this folder's timeline it passes: each sit reached in 0.78 s, each stand in 0.32–0.34 s, the
-head within 0.06 rad, no fall. Add `--timeline <file>` to check another timeline.
+With this folder's Electric Slide it dances every section without a fall, but follows only 15-20 %
+of each sideways move (sidesteps of about 0.1 m for 0.6 m commanded), so `check.py` says FAIL; back
+and forward moves reach 33-45 % and the quarter turn 62-72 %. Add `--timeline <file>` to check
+another timeline.
 
 Agree with the user before the first run: the performance they want; whether their policy (at
 first, the recipe trained as is) can already perform it, so that only `timeline.json` changes; and
@@ -188,15 +195,14 @@ their account, which needs a payment method; the 3000-iteration recipe took 2 h 
   import sys; from tensorboard.backend.event_processing.event_accumulator import EventAccumulator as E
   ea = E(sys.argv[1], size_guidance={'scalars': 0}).Reload()
   for tag in sys.argv[2:]: print(tag, [(e.step, round(e.value, 3)) for e in ea.Scalars(tag)][-8:])
-  " logs/rsl_rl/got_a_talent/<run> Episode_Reward/posture_composite Episode_Reward/posture_stillness Episode_Reward/head_pose_tracking
+  " logs/rsl_rl/got_a_talent/<run> Episode_Reward/track_linear_velocity Episode_Reward/track_angular_velocity Episode_Reward/head_pose_tracking Episode_Termination/fell_over
   ```
 
-  There is no fall termination, so episodes always last their 12 s: the episode length says nothing.
-  `posture_composite` (height × upright × pose against the commanded posture) is the main task
-  term: it must keep growing. Curriculum stages land at iterations 500, 750, 1000, 1250, 1500, 2000
-  and 2500 (the head range widens up to 2000, pushes come in from 1000): a drop right at one means
-  the pacing is wrong. A run that has collapsed and not recovered within about 500 iterations: tell
-  the user and propose stopping it.
+  `track_linear_velocity` and `track_angular_velocity` are the main task terms: they must keep
+  growing while `fell_over` falls. Curriculum stages land at iterations 500 to 2000 (standing
+  environments, head range, action-rate smoothing): a drop right at one means the pacing is wrong. A
+  run that has collapsed and not recovered within about 500 iterations: tell the user and propose
+  stopping it.
 
 ### Judging every checkpoint
 
@@ -220,11 +226,9 @@ the user will publish:
   `--dry-run` exports exactly as the real publish (the observation normalizer baked in) into
   `publish-eval/`, and publishes nothing.
 
-Pick a checkpoint that passes, then the one with the smallest head error and the quickest sits and
-rises (the per-keyframe lines). The Arena plays one start, without training's randomization: a
-checkpoint whose neighbours pass too is the safer pick. The reference is checkpoint 2000 of its
-run, chosen that way: replayed under training's randomization, checkpoints 1000–1750 sat in
-1.5–2.5 s instead of about 1 s. The best checkpoint is often not the last. GPU training varies a lot
+Pick a checkpoint that passes, then the one that follows the largest share of its moves (the
+verdict line) without a fall. The Arena plays one start, without training's randomization: a
+checkpoint whose neighbours pass too is the safer pick. The best checkpoint is often not the last. GPU training varies a lot
 from run to run: before building on a surprising result, run the same commit with another
 `--agent.seed`.
 
@@ -233,9 +237,9 @@ from run to run: before building on a surprising result, run the same commit wit
 After each run, tell the user in a few lines:
 
 ```
-run head1 (commit 1a2b3c4: head_reward 0.75 → 1.0, to follow the head moves more closely)
-best: checkpoint 2250, PASS, head error 0.04 rad, sits in 0.80 s, rises in 0.35 s   (reference PASS, 0.06 rad)
-others: 1500 FAIL (sit reached after 1.62 s) · 2000 PASS 0.05 rad · 2999 PASS 0.07 rad
+run dance2 (commit 1a2b3c4: forward_reward 2.0 → 3.0, to follow the sidesteps more closely)
+best: checkpoint 2250, PASS, smallest share of a move 41 %, no fall   (Pollen's walker FAIL, 15 %)
+others: 1500 FAIL (fell at 12.3 s) · 2000 PASS 33 % · 2999 PASS 38 %
 next: <your proposal and why>
 ```
 
@@ -260,11 +264,10 @@ fork, never `pollen-robotics`; the workshop's home sets that up).
   policy to time a sit-and-stand routine on its own under a constant command: ten runs failed. A
   clock kept in the policy's own joints washes out under PPO's exploration noise within seconds.
   Any new move should be triggered by a command, never by the policy counting.
-- **This env starts from a recipe that works**: microduck_rl's sit & stand task, whose published
-  policies sit in about 1 s and rise upright in under 0.5 s. Its solver went from 30/50 to the
-  Arena's 10/20 iterations, and it still sits and rises.
-- **Pushes come late on purpose**: in an earlier sit task, pushes during the descent, before the
-  transitions had consolidated, made the policy unlearn sitting and just stand.
+- **dance1 (2026-10-19) swapped the sit & stand task for a walker.** The starting recipe was
+  microduck_rl's sit & stand task (sits in about 1 s, rises in under 0.5 s, at the Arena's 10/20
+  solver); it is in this folder's git history. The walker is microduck_rl's velocity task with
+  the Arena's collision set and solver.
 - **Judge the exported, deterministic policy.** One failed attempt completed its moves only with
   exploration noise on; deterministic, it never moved. `check.py` and the workshop judge the export.
 - **Reward traps met on this robot**, worth knowing before adding a move: a state that earns the

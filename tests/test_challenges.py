@@ -28,9 +28,9 @@ CHALLENGES = {
         "step_reward": ("air_time", 4.1),
     },
     "got_a_talent": {
-        "head_reward": ("head_pose_tracking", 1.3),
-        "stillness_reward": ("posture_stillness", 3.1),
-        "upright_reward": ("upright_linear", 3.7),
+        "forward_reward": ("track_linear_velocity", 3.7),
+        "upright_reward": ("upright", 1.3),
+        "step_reward": ("air_time", 4.1),
     },
     "hill_climb_1m5": {
         "forward_reward": ("track_linear_velocity", 3.7),
