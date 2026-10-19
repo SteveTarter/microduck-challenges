@@ -39,7 +39,7 @@ CHALLENGES = {
         "max_slope_deg": (None, 12.0),
     },
     "roller_sprint_2m": {
-        "speed_reward": ("wheel_speed", 13.5),
+        "speed_reward": ("forward_speed", 13.5),
         "upright_reward": ("upright", 1.3),
     },
 }

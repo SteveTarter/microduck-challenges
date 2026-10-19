@@ -10,9 +10,9 @@ num_envs       = 2048
 max_iterations = 6000
 seed           = 10301
 
-[params.speed_reward]
-label = "Wheel speed reward"
-value = 10.0
+[params.speed_reward]     # skate3: now the forward_speed weight (was wheel_speed, 10.0)
+label = "Forward speed reward"
+value = 12.0
 min   = 2.0
 max   = 20.0
 
