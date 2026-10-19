@@ -320,6 +320,16 @@ def make_env_cfg(
         "asset_cfg"
     ].geom_names = foot_frictions_geom_names
     cfg.events["foot_friction"].params["ranges"] = (0.7, 1.3)  # Grippier footpad — narrowed from (0.3, 1.2)
+    # dance2: a fall ends the episode where the Arena calls one. dance1 kept the
+    # velocity task's 70° limit; with the Arena's collision set the trunk and head
+    # rest on the floor, and its checkpoint 1000 lay face down at ~67° (trunk at
+    # 0.035 m) for whole episodes. Now 60° (the Arena's gravity_z -0.5) and a trunk
+    # below 0.07 m (it stands at ~0.115 m) both end it.
+    cfg.terminations["fell_over"].params["limit_angle"] = math.radians(60.0)
+    cfg.terminations["trunk_down"] = TerminationTermCfg(
+        func=mdp.root_height_below_minimum,
+        params={"minimum_height": 0.07},
+    )
     # Terminate environments that have gone numerically unstable (NaN physics).
     # MuJoCo can produce NaN joint positions on extreme contact impulses.
     # Terminating immediately resets to a valid state before NaN propagates

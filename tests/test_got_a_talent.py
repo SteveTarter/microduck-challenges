@@ -104,6 +104,16 @@ def test_got_a_talent_ends_a_training_episode_at_a_fall(cfg):
     assert "nan_state" in cfg.terminations
 
 
+def test_got_a_talent_cannot_rest_lying_down(cfg):
+    """dance2: the Arena's collision set lets the trunk rest on the floor. A fall
+    must end the episode where the Arena calls one (60°, gravity_z -0.5), and a
+    trunk on the floor must end it whatever its tilt, or lying still pays."""
+    limit = cfg.terminations["fell_over"].params["limit_angle"]
+    event = load_event("got-a-talent")
+    assert math.isclose(math.cos(limit), -event.termination.fall_gravity_z)
+    assert cfg.terminations["trunk_down"].params["minimum_height"] >= 0.06
+
+
 def test_got_a_talent_reads_what_a_timeline_carries(cfg):
     """twist the walking command (forward, sideways, turn), head_pose the 4 head
     deltas, body zeros: a keyframe's 13 numbers, in the 61-D observation's command slot."""
