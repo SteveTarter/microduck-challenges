@@ -145,11 +145,11 @@ def test_the_reference_timeline_plays_on_the_arena():
 
 
 def test_the_reference_timeline_stays_inside_what_training_saw(cfg):
-    """Every walking command within the trained ranges, the head within its
-    starting range (the curriculum widens it later), body zeros."""
+    """Every walking command within the trained ranges, the head within the
+    range a full training reaches (the curriculum's last stage), body zeros."""
     timeline = load_timeline(TIMELINE, load_event("got-a-talent").time_limit_s)
     ranges = cfg.commands["twist"].ranges
-    head = cfg.commands["head_pose"].ranges
+    head = cfg.curriculum["head_pose_range"].params["range_stages"][-1]["ranges"]
     for command in timeline.commands:
         for value, (lo, hi) in zip(command[0:3], (ranges.lin_vel_x, ranges.lin_vel_y, ranges.ang_vel_z)):
             assert lo <= value <= hi
