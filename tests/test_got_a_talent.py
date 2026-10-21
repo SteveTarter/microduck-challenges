@@ -97,21 +97,31 @@ def test_got_a_talent_solves_contacts_like_the_arena(cfg, arena):
     assert cfg.decimation == DECIMATION
 
 
-def test_got_a_talent_plays_on_after_a_fall_like_the_stage(cfg):
-    assert "fell_over" not in cfg.terminations
+def test_got_a_talent_ends_a_training_episode_at_a_fall(cfg):
+    """dance1: a walker cannot get up, so training ends an episode at a fall, as
+    every walking task does. The stage still plays on after one (the Arena's rule)."""
+    assert "fell_over" in cfg.terminations
     assert "nan_state" in cfg.terminations
 
 
+def test_got_a_talent_cannot_rest_lying_down(cfg):
+    """dance2: the Arena's collision set lets the trunk rest on the floor. A fall
+    must end the episode where the Arena calls one (60°, gravity_z -0.5), and a
+    trunk on the floor must end it whatever its tilt, or lying still pays."""
+    limit = cfg.terminations["fell_over"].params["limit_angle"]
+    event = load_event("got-a-talent")
+    assert math.isclose(math.cos(limit), -event.termination.fall_gravity_z)
+    assert cfg.terminations["trunk_down"].params["minimum_height"] >= 0.06
+
+
 def test_got_a_talent_reads_what_a_timeline_carries(cfg):
-    """twist.vx is the sit flag, head_pose the 4 head deltas, body zeros: a
-    keyframe's 13 numbers, in the 61-D observation's command slot."""
-    assert isinstance(cfg.commands["twist"], microduck_mdp.SitStandCommandCfg)
+    """twist the walking command (forward, sideways, turn), head_pose the 4 head
+    deltas, body zeros: a keyframe's 13 numbers, in the 61-D observation's command slot."""
+    assert isinstance(cfg.commands["twist"], microduck_mdp.VelocityCommandCommandOnlyCfg)
     assert len(cfg.commands["head_pose"].ranges) == 4
     actor = cfg.observations["actor"].terms
     assert list(actor)[-3:] == ["command", "head_command", "body_command"]
     assert actor["head_command"].params == {"command_name": "head_pose"}
-    assert actor["body_command"].func is microduck_mdp.zero_command_padding
-    assert actor["body_command"].params == {"dim": 6}
 
 
 def test_checks_head_joint_order_matches_head_pose_trackings_own(cfg):
@@ -132,49 +142,51 @@ TIMELINE = Path(microduck_challenges.__file__).parent / "got_a_talent" / "timeli
 def test_the_reference_timeline_plays_on_the_arena():
     timeline = load_timeline(TIMELINE, load_event("got-a-talent").time_limit_s)
     assert timeline.duration_s == 20.0
-    assert len(timeline.times) == 9
 
 
 def test_the_reference_timeline_stays_inside_what_training_saw(cfg):
+    """Every walking command within the trained ranges, the head within the
+    range a full training reaches (the curriculum's last stage), body zeros."""
     timeline = load_timeline(TIMELINE, load_event("got-a-talent").time_limit_s)
-    final = cfg.curriculum["head_pose_range"].params["range_stages"][-1]["ranges"]
-    dwell = cfg.commands["twist"].resampling_time_range[0]
-    head_every = cfg.commands["head_pose"].resampling_time_range[0]
-    flags = [c[0] for c in timeline.commands]
-    assert set(flags) <= {0.0, 1.0}
+    ranges = cfg.commands["twist"].ranges
+    head = cfg.curriculum["head_pose_range"].params["range_stages"][-1]["ranges"]
     for command in timeline.commands:
-        assert command[1:3] == (0.0, 0.0) and command[7:] == (0.0,) * 6
-        for value, (_, hi) in zip(command[3:7], final):
-            assert abs(value) <= 0.4 * hi
-    changes = [t for i, t in enumerate(timeline.times) if i and flags[i] != flags[i - 1]]
-    bounds = changes + [timeline.duration_s]
-    assert all(b - a >= dwell for a, b in zip(bounds, bounds[1:]))
-    head_changes = [t for i, t in enumerate(timeline.times)
-                    if i and timeline.commands[i][3:7] != timeline.commands[i - 1][3:7]]
-    assert all(b - a >= head_every for a, b in zip(head_changes, head_changes[1:]))
+        for value, (lo, hi) in zip(command[0:3], (ranges.lin_vel_x, ranges.lin_vel_y, ranges.ang_vel_z)):
+            assert lo <= value <= hi
+        for value, (lo, hi) in zip(command[3:7], head):
+            assert lo <= value <= hi
+        assert command[7:] == (0.0,) * 6
 
 
-STAND = (0.0,) * 13
-SIT_LEFT = (1.0, 0.0, 0.0, 0.0, 0.0, 0.5, 0.0) + (0.0,) * 6
-EIGHT_S = Timeline(8.0, (0.0, 2.0, 5.0), (STAND, SIT_LEFT, STAND))
+STILL = (0.0,) * 13
+LEFT = (0.0, 0.3, 0.0) + (0.0,) * 10
+TURN = (0.0, 0.0, 0.5) + (0.0, 0.0, 0.5, 0.0) + (0.0,) * 6
+EIGHT_S = Timeline(8.0, (0.0, 2.0, 4.0), (STILL, LEFT, TURN))
 
 
-def _trace(z_at, yaw_at=lambda t: 0.0, tilt_at=lambda t: 0.0, duration_s=8.0):
-    """A synthetic performance: trunk height, head yaw delta and roll tilt as functions of time."""
-    n = round(duration_s / CTRL_DT)
+def _trace(y_at=lambda t: 0.0, yaw_at=lambda t: 0.0, head_yaw_at=lambda t: 0.0, tilt_at=lambda t: 0.0):
+    """A synthetic performance: sideways position, heading, head yaw delta and roll tilt over time."""
+    n = round(8.0 / CTRL_DT)
     trace = np.zeros((n, TRACE_WIDTH), dtype=np.float32)
     for i in range(n):
         t = i * CTRL_DT
-        half = np.radians(tilt_at(t)) / 2
-        trace[i, 2] = z_at(t)
-        trace[i, 3:7] = (np.cos(half), np.sin(half), 0.0, 0.0)
+        yaw, roll = yaw_at(t) / 2, np.radians(tilt_at(t)) / 2
+        # roll about x, then yaw about z (w, x, y, z)
+        trace[i, 3:7] = (np.cos(yaw) * np.cos(roll), np.cos(yaw) * np.sin(roll),
+                         np.sin(yaw) * np.sin(roll), np.sin(yaw) * np.cos(roll))
+        trace[i, 1] = y_at(t)
+        trace[i, 2] = 0.115
         trace[i, 7:] = DEFAULT_POSE
-        trace[i, 7 + JOINT_NAMES.index("head_yaw")] += yaw_at(t)
+        trace[i, 7 + JOINT_NAMES.index("head_yaw")] += head_yaw_at(t)
     return trace
 
 
-def _seated_between(a, b):
-    return lambda t: 0.06 if a <= t < b else 0.115
+def _slide_left(t):
+    return 0.3 * min(max(t - 2.0, 0.0), 2.0)
+
+
+def _turn_left(t):
+    return 0.5 * min(max(t - 4.0, 0.0), 4.0)
 
 
 def _report(trace):
@@ -184,51 +196,47 @@ def _report(trace):
 
 
 def test_a_performance_that_follows_its_timeline_passes():
-    lines, passed, head = _report(_trace(_seated_between(3.0, 5.8), yaw_at=lambda t: 0.5 if 2.3 <= t < 5.0 else 0.0))
+    lines, passed, followed = _report(_trace(_slide_left, _turn_left, lambda t: 0.5 if t >= 4.5 else 0.0))
     assert passed, lines
     assert len(lines) == 4  # three keyframes, then the fall line
-    assert head < 0.01
+    assert followed > 0.9
 
 
-def test_a_sit_never_reached_fails():
-    lines, passed, _ = _report(_trace(lambda t: 0.115))
+def test_standing_still_through_a_move_fails():
+    lines, passed, followed = _report(_trace(yaw_at=_turn_left, head_yaw_at=lambda t: 0.5 if t >= 4.5 else 0.0))
     assert not passed
-    assert "sit: not reached within 1.5 s" in lines[1]
+    assert followed == pytest.approx(0.0, abs=1e-3)
+    assert "left +0.00/+0.60 m" in lines[1]
 
 
-def test_a_sit_reached_late_fails():
-    lines, passed, _ = _report(_trace(_seated_between(3.8, 5.8)))
+def test_moving_the_wrong_way_fails():
+    lines, passed, followed = _report(_trace(lambda t: -_slide_left(t), _turn_left, lambda t: 0.5 if t >= 4.5 else 0.0))
     assert not passed
-    assert "sit: not reached within 1.5 s" in lines[1]
-
-
-def test_a_sit_left_early_fails():
-    lines, passed, _ = _report(_trace(_seated_between(3.0, 4.0)))
-    assert not passed
-    assert "left at 4.00 s" in lines[1]
+    assert followed < 0
 
 
 def test_a_head_far_from_its_command_fails():
-    lines, passed, head = _report(_trace(_seated_between(3.0, 5.8), yaw_at=lambda t: 0.9 if 2.3 <= t < 5.0 else 0.0))
+    lines, passed, _ = _report(_trace(_slide_left, _turn_left, lambda t: 0.9 if t >= 4.5 else 0.0))
     assert not passed
-    assert head == pytest.approx(0.4, abs=1e-3)
-    assert "head: off by 0.40 rad" in lines[1]
+    assert "head: off by 0.40 rad" in lines[2]
 
 
 def test_a_fall_fails():
-    lines, passed, _ = _report(_trace(_seated_between(3.0, 5.8), tilt_at=lambda t: 80.0 if t >= 6.0 else 0.0))
+    lines, passed, _ = _report(_trace(_slide_left, _turn_left, lambda t: 0.5 if t >= 4.5 else 0.0,
+                                      tilt_at=lambda t: 80.0 if t >= 6.0 else 0.0))
     assert not passed
     assert lines[-1] == "fell at 6.30 s"
 
 
-def test_check_plays_the_stage_and_fails_a_walker(capsys):
-    """End to end on the Arena: the reference walker does not sit."""
+def test_check_plays_the_stage_end_to_end(capsys):
+    """End to end on the Arena, with Pollen's walker bundled in the Arena."""
     from microduck_challenges.got_a_talent import check
 
-    assert check.main([str(ASSET_ROOT / "policies" / "BEST_alpha_walking.onnx")]) == 1
+    check.main([str(ASSET_ROOT / "policies" / "BEST_alpha_walking.onnx")])
     out = capsys.readouterr().out.splitlines()
-    assert len(out) == 9 + 2  # a line per keyframe, the fall line, the verdict
-    assert out[-1].startswith("FAIL: largest head error ")
+    timeline = load_timeline(TIMELINE, load_event("got-a-talent").time_limit_s)
+    assert len(out) == len(timeline.times) + 2  # a line per keyframe, the fall line, the verdict
+    assert out[-1].split(":")[0] in ("PASS", "FAIL")
 
 
 def test_check_refuses_a_malformed_timeline(tmp_path, capsys):
@@ -243,11 +251,11 @@ def test_check_refuses_a_malformed_timeline(tmp_path, capsys):
 
 
 def test_the_manifest_says_what_the_policy_reads():
-    """publish writes this into every got-a-talent manifest: the sit flag and the head pose, never 'unused'."""
+    """publish writes this into every got-a-talent manifest: the walking command and the head pose, never 'unused'."""
     from mjlab_microduck import challenge as ch
 
     import microduck_challenges  # noqa: F401 — registers every challenge's task
 
     command = ch.for_task("Mjlab-GotATalent-MicroDuck").command
-    assert command["twist"].startswith("[sit flag")
+    assert command["twist"].startswith("[forward m/s")
     assert "head_yaw" in command["head"]

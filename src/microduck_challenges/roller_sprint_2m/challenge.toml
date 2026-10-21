@@ -10,14 +10,14 @@ num_envs       = 2048
 max_iterations = 6000
 seed           = 10301
 
-[params.speed_reward]
-label = "Wheel speed reward"
-value = 10.0
+[params.speed_reward]     # skate3: now the forward_speed weight (was wheel_speed, 10.0)
+label = "Forward speed reward"
+value = 12.0
 min   = 2.0
 max   = 20.0
 
-[params.upright_reward]
+[params.upright_reward]   # skate4: 2.0 -> 1.0 (the sprint's), room to lean like the leader
 label = "Stay upright"
-value = 2.0
+value = 1.0
 min   = 0.5
 max   = 5.0

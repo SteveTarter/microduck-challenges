@@ -53,12 +53,13 @@ observation noise.
 
 | Knob | Label | Default | Range | Sets in `env.py` |
 |---|---|---|---|---|
-| `speed_reward` | Wheel speed reward | 10.0 | 2.0–20.0 | `wheel_speed` weight |
-| `upright_reward` | Stay upright | 2.0 | 0.5–5.0 | `upright` weight |
+| `speed_reward` | Forward speed reward | 12.0 | 2.0–20.0 | `forward_speed` weight |
+| `upright_reward` | Stay upright | 1.0 | 0.5–5.0 | `upright` weight |
 
-How the training reads the command: `vx` = 0 coasts, `vx` > 0 pushes, `vx` < 0 brakes. `wheel_speed`
-is the only positive task reward (the wheels must actually spin); `braking`, `skating_air_time`,
-`glide`, `single_support`, `gait_symmetry`, `forward_lean` and `heading_hold` shape the skating style.
+Since skate3, `forward_speed` (trunk speed, independent of the command, as in the 2 m Sprint) is
+the main task reward. The skating-style terms (`wheel_speed`, `braking`, `skating_air_time`, `glide`,
+`single_support`, `forward_lean`) were removed, because the 0.928 s leader bounds from foot to foot
+rather than gliding. `gait_symmetry` and `heading_hold` remain.
 Each term's comment in `env.py` says why it has its weight.
 
 Do not change, or the Arena cannot race the policy or the tests fail:

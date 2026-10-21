@@ -7,15 +7,15 @@ folder's timeline.json by default), then checks the performance against the
 timeline, keyframe by keyframe:
 
 - no fall, by the event's own rule;
-- at the start, and after each change of the sit flag (twist.vx): seated
-  within 1.5 s when it is now 1, or standing upright within 1.5 s when it is
-  now 0, and held until the flag changes again;
+- every walking move (twist): over the keyframe, the robot covers at least
+  MIN_FOLLOW of each commanded forward, sideways and turn amount (command x
+  keyframe length), in the commanded direction, measured in the frame the
+  robot faced when the keyframe began;
 - every keyframe held 2 s or more: each head joint within 0.25 rad of the
   default pose plus the keyframe's head command, over the hold's last 0.5 s.
 
-Seated and standing are the Arena's own readings (arena.stage). Prints a line
-per keyframe; exits 1 when anything fails, including a performance that did
-not play to the end.
+Prints a line per keyframe; exits 1 when anything fails, including a
+performance that did not play to the end.
 """
 
 import argparse
@@ -32,7 +32,7 @@ from arena.timeline import Timeline, TimelineError, load_timeline
 
 EVENT = "got-a-talent"
 TIMELINE = Path(__file__).with_name("timeline.json")
-REACH_S = 1.5
+MIN_FOLLOW = 0.25
 HEAD_HOLD_S = 2.0
 HEAD_WINDOW_S = 0.5
 HEAD_TOLERANCE_RAD = 0.25
@@ -44,30 +44,34 @@ def _frames(start_s: float, end_s: float) -> slice:
     return slice(round(start_s / CTRL_DT), round(end_s / CTRL_DT))
 
 
-def _flag_segments(timeline: Timeline) -> list[tuple[float, float, bool]]:
-    """(start, end, sit) for each stretch where the sit flag keeps one value."""
-    segments: list[tuple[float, float, bool]] = []
-    for t, command in zip(timeline.times, timeline.commands):
-        sit = command[0] >= 0.5
-        if segments and segments[-1][2] == sit:
+def _yaw(quat) -> float:
+    w, x, y, z = quat
+    return float(np.arctan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z)))
+
+
+def _moves(trace, command, start_s: float, end_s: float) -> tuple[str, bool, float]:
+    """What the robot did against the keyframe's twist, and the smallest share of it followed."""
+    wanted = np.asarray(command[0:3]) * (end_s - start_s)
+    if not np.any(wanted):
+        return "moves: none commanded", True, 1.0
+    a = round(start_s / CTRL_DT)
+    b = min(round(end_s / CTRL_DT), len(trace) - 1)
+    if b <= a:
+        return "moves: the performance ended before this keyframe", False, 0.0
+    yaw0 = _yaw(trace[a, 3:7])
+    dx, dy = trace[b, 0:2] - trace[a, 0:2]
+    forward = np.cos(yaw0) * dx + np.sin(yaw0) * dy
+    left = -np.sin(yaw0) * dx + np.cos(yaw0) * dy
+    turn = (_yaw(trace[b, 3:7]) - yaw0 + np.pi) % (2 * np.pi) - np.pi
+    done = np.array([forward, left, turn])
+    parts, worst = [], np.inf
+    for name, unit, w, d in zip(("forward", "left", "turn"), ("m", "m", "rad"), wanted, done):
+        if w == 0:
             continue
-        if segments:
-            segments[-1] = (segments[-1][0], t, segments[-1][2])
-        segments.append((t, timeline.duration_s, sit))
-    return segments
-
-
-def _posture(trace, start_s: float, end_s: float, sit: bool) -> tuple[str, bool]:
-    name = "sit" if sit else "stand"
-    window = (stage.seated(trace) if sit else stage.standing(trace))[_frames(start_s, end_s)]
-    reach = window[: round(REACH_S / CTRL_DT)]
-    if not reach.any():
-        return f"{name}: not reached within {REACH_S:g} s", False
-    first = int(np.argmax(reach))
-    if not window[first:].all():
-        left = start_s + (first + int(np.argmin(window[first:]))) * CTRL_DT
-        return f"{name}: reached after {first * CTRL_DT:.2f} s, left at {left:.2f} s", False
-    return f"{name}: reached after {first * CTRL_DT:.2f} s, held until {end_s:.2f} s", True
+        share = d / w
+        worst = min(worst, share)
+        parts.append(f"{name} {d:+.2f}/{w:+.2f} {unit}")
+    return "moves: " + ", ".join(parts), worst >= MIN_FOLLOW, float(worst)
 
 
 def _head(trace, command, start_s: float, end_s: float) -> tuple[str, bool, float]:
@@ -82,24 +86,19 @@ def _head(trace, command, start_s: float, end_s: float) -> tuple[str, bool, floa
 
 
 def report(trace, timeline: Timeline, termination) -> tuple[list[str], bool, float]:
-    """A line per keyframe then the fall line, whether everything passed, and the largest head error."""
-    starts = {start: (end, sit) for start, end, sit in _flag_segments(timeline)}
+    """A line per keyframe then the fall line, whether everything passed, and the
+    smallest share of a commanded move the robot followed."""
     ends = list(timeline.times[1:]) + [timeline.duration_s]
-    lines, passed, head_error = [], True, 0.0
+    lines, passed, followed = [], True, 1.0
     for t, command, end in zip(timeline.times, timeline.commands, ends):
-        parts = []
-        if t in starts:
-            text, ok = _posture(trace, t, *starts[t])
-            parts.append(text)
-            passed &= ok
-        text, ok, worst = _head(trace, command, t, end)
-        parts.append(text)
-        passed &= ok
-        head_error = max(head_error, worst)
-        lines.append(f"t={t:5.2f}  " + "; ".join(parts))
+        moves, ok_moves, share = _moves(trace, command, t, end)
+        head, ok_head, _ = _head(trace, command, t, end)
+        passed &= ok_moves and ok_head
+        followed = min(followed, share)
+        lines.append(f"t={t:5.2f}  {moves}; {head}")
     fell = stage.fell_at(trace, termination)
     lines.append("no fall" if fell is None else f"fell at {fell:.2f} s")
-    return lines, passed and fell is None, head_error
+    return lines, passed and fell is None, followed
 
 
 def main(argv=None) -> int:
@@ -115,10 +114,10 @@ def main(argv=None) -> int:
     except (TimelineError, PolicyError) as exc:
         print(f"{exc}", file=sys.stderr)
         return 1
-    lines, passed, head_error = report(result.trace, timeline, event.termination)
+    lines, passed, followed = report(result.trace, timeline, event.termination)
     passed = passed and result.seeds_finished == 1
     print("\n".join(lines))
-    print(f"{'PASS' if passed else 'FAIL'}: largest head error {head_error:.2f} rad")
+    print(f"{'PASS' if passed else 'FAIL'}: smallest share of a move followed {followed:.0%}")
     return 0 if passed else 1
 
 
