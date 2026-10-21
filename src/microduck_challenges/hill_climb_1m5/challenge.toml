@@ -29,6 +29,6 @@ max   = 6.0
 
 [params.max_slope_deg]
 label = "Steepest training slope (°)"
-value = 14.0
+value = 10.0
 min   = 8.0
 max   = 15.0
